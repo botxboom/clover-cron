@@ -79,26 +79,43 @@ async function fetchData() {
   }
 }
 
+const CLOVER_HUBSPOT_MAPPING = {
+  customers: "contacts",
+  orders: "orders",
+  payments: "commerce_payments",
+  inventory: "products",
+};
+
+function postCustomersToHubSpot(customers) {
+  const mapCustomersToHubspot = customers.map((customer) => {
+    return {
+      properties: {
+        firstname: customer.firstName,
+        lastname: customer.lastName,
+      },
+    };
+  });
+
+  console.log("Mapped customers to HubSpot format:", mapCustomersToHubspot);
+
+  return;
+  fetch(`${process.env.HUBSPOT_API_URL}/${CLOVER_HUBSPOT_MAPPING[item.type]}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify(data),
+  });
+}
+
 async function postDataToHubSpot(fetchedData) {
   try {
-    const postDataPromises = fetchedData.map(async (item) => {
-      const response = await fetch(`${process.env.HUBSPOT_API_URL}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.HUBSPOT_API_KEY}`,
-        },
-        body: JSON.stringify(item),
-      });
+    const customers = fetchedData[0].data;
+    const payments = fetchedData[1].data;
+    const orders = fetchedData[2].data;
+    const inventory = fetchedData[3].data;
 
-      if (!response.ok) {
-        throw new Error(
-          `Failed to post data to HubSpot. Status: ${response.status}`
-        );
-      }
-
-      return await response.json();
-    });
+    postCustomersToHubSpot(customers);
 
     const results = await Promise.all(postDataPromises);
     console.log("Data successfully posted to HubSpot:", results);
@@ -113,9 +130,6 @@ async function fetchAndPostData() {
   try {
     console.log("Starting fetch and post process...");
     const fetchedData = await fetchData();
-    console.log("Fetched data:", fetchedData);
-
-    return;
 
     const results = await postDataToHubSpot(fetchedData);
     console.log("Data successfully processed:", results);
@@ -124,8 +138,8 @@ async function fetchAndPostData() {
   }
 }
 
-// Schedule the cron job to run every minute
-cron.schedule("* * * * *", async () => {
+// Schedule the cron job to run at the first minute of every hour
+cron.schedule("1 * * * *", async () => {
   console.log("Cron job started at:", new Date().toISOString());
   await fetchAndPostData();
 });
