@@ -2,6 +2,9 @@ const cron = require("node-cron");
 require("dotenv").config();
 
 let latestCustomerSince = null;
+let latestOrderCreatedTime = null;
+let latestPaymentCreatedTime = null;
+let latestCountOfItems = 0;
 
 function getFetchDataMetadata() {
   return [
@@ -17,13 +20,17 @@ function getFetchDataMetadata() {
       type: "payments",
       path: `/payments`,
       limit: 100,
-      filter: null,
+      filter: latestPaymentCreatedTime
+        ? `createdTime>${latestPaymentCreatedTime || ""}`
+        : null,
     },
     {
       type: "orders",
       path: `/orders`,
       limit: 100,
-      filter: null,
+      filter: latestOrderCreatedTime
+        ? `createdTime>${latestOrderCreatedTime || ""}`
+        : null,
     },
     {
       type: "inventory",
@@ -37,6 +44,13 @@ function getFetchDataMetadata() {
 async function fetchData() {
   try {
     const fetchDataPromises = getFetchDataMetadata().map(async (data) => {
+      if (data.type === "inventory" && latestCountOfItems > 0) {
+        return {
+          type: data.type,
+          data: [],
+        };
+      }
+
       const apiPath = `${process.env.CLOVER_BASE_URL}/${
         process.env.CLOVER_MERCHANT_ID
       }${data.path}?limit=${data.limit}${
@@ -61,7 +75,19 @@ async function fetchData() {
           // Update latestCustomerSince with the most recent customer
           // This assumes customerSince is a timestamp or date string
           latestCustomerSince = jsonData.elements[0]?.customerSince || null;
+        } else if (data.type === "orders" && jsonData.elements.length > 0) {
+          // Update latestOrderCreatedTime with the most recent order
+          // This assumes createdTime is a timestamp or date string
+          latestOrderCreatedTime = jsonData.elements[0]?.createdTime || null;
+        } else if (data.type === "payments" && jsonData.elements.length > 0) {
+          // Update latestPaymentCreatedTime with the most recent payment
+          // This assumes createdTime is a timestamp or date string
+          latestPaymentCreatedTime = jsonData.elements[0]?.createdTime || null;
+        } else {
+          // Update latestCountOfItems with the count of items
+          latestCountOfItems = jsonData.elements.length;
         }
+
         return {
           type: data.type,
           data: jsonData.elements,
@@ -87,6 +113,10 @@ const CLOVER_HUBSPOT_MAPPING = {
 };
 
 function postCustomersToHubSpot(customers) {
+  if (customers.length === 0) {
+    return;
+  }
+
   const mapCustomersToHubspot = customers.map((customer) => {
     return {
       properties: {
@@ -96,7 +126,87 @@ function postCustomersToHubSpot(customers) {
     };
   });
 
-  console.log("Mapped customers to HubSpot format:", mapCustomersToHubspot);
+  fetch(
+    `${process.env.HUBSPOT_API_URL}/${
+      CLOVER_HUBSPOT_MAPPING[item.type]
+    }/batch/create`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify({
+        inputs: mapCustomersToHubspot,
+      }),
+    }
+  )
+    .then((response) => {
+      if (!response.ok) {
+        console.error("Error response from HubSpot:", response);
+      } else {
+        console.log("Customers posted to HubSpot successfully.");
+      }
+    })
+    .then((data) => {
+      console.log("HubSpot response data:", data);
+    });
+}
+
+function postInventoryToHubSpot(items) {
+  if (items.length === 0) {
+    return;
+  }
+  const mapInventoryToHubspot = items.map((item) => {
+    return {
+      properties: {
+        name: item.name,
+        price: item.price,
+      },
+    };
+  });
+
+  fetch(
+    `${process.env.HUBSPOT_API_URL}/${CLOVER_HUBSPOT_MAPPING.inventory}/batch/create`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        inputs: mapInventoryToHubspot,
+      }),
+    }
+  )
+    .then((response) => {
+      if (!response.ok) {
+        console.error("Error response from HubSpot:", response);
+      } else {
+        console.log("Inventory posted to HubSpot successfully.");
+      }
+    })
+    .then((data) => {
+      console.log("HubSpot response data:", data);
+    });
+}
+
+function postOrdersToHubSpot(orders) {
+  if (orders.length === 0) {
+    return;
+  }
+
+  const mapOrdersToHubspot = orders.map((order) => {
+    return {
+      properties: {
+        order_id: order.id,
+        customer_id: order.customerId,
+        total_amount: order.totalAmount,
+      },
+    };
+  });
+
+  console.log("Mapped orders to HubSpot format:", mapOrdersToHubspot);
 
   return;
   fetch(`${process.env.HUBSPOT_API_URL}/${CLOVER_HUBSPOT_MAPPING[item.type]}`, {
@@ -108,18 +218,44 @@ function postCustomersToHubSpot(customers) {
   });
 }
 
+function postPaymentsToHubSpot(payments) {
+  if (payments.length === 0) {
+    return;
+  }
+
+  const mapPaymentsToHubspot = payments.map((payment) => {
+    return {
+      properties: {
+        payment_id: payment.id,
+        amount: payment.amount,
+        status: payment.status,
+      },
+    };
+  });
+
+  fetch(
+    `${process.env.HUBSPOT_API_URL}/${CLOVER_HUBSPOT_MAPPING.payments}/batch/create`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify(mapPaymentsToHubspot),
+    }
+  );
+}
+
 async function postDataToHubSpot(fetchedData) {
   try {
     const customers = fetchedData[0].data;
+    const inventory = fetchedData[3].data;
     const payments = fetchedData[1].data;
     const orders = fetchedData[2].data;
-    const inventory = fetchedData[3].data;
 
     postCustomersToHubSpot(customers);
-
-    const results = await Promise.all(postDataPromises);
-    console.log("Data successfully posted to HubSpot:", results);
-    return results;
+    postInventoryToHubSpot(inventory);
+    // postOrdersToHubSpot(orders);
+    // postPaymentsToHubSpot(payments);
   } catch (error) {
     console.error("Error posting data to HubSpot:", error);
     throw error;
@@ -138,8 +274,8 @@ async function fetchAndPostData() {
   }
 }
 
-// Schedule the cron job to run at the first minute of every hour
-cron.schedule("1 * * * *", async () => {
+// Schedule the cron job to run every hour
+cron.schedule("0 * * * *", async () => {
   console.log("Cron job started at:", new Date().toISOString());
   await fetchAndPostData();
 });
