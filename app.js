@@ -6,279 +6,281 @@ let latestOrderCreatedTime = null;
 let latestPaymentCreatedTime = null;
 let latestCountOfItems = 0;
 
-function getFetchDataMetadata() {
-  return [
-    {
-      type: "customers",
-      path: `/customers`,
-      limit: 100,
-      filter: latestCustomerSince
-        ? `customerSince>${latestCustomerSince || ""}`
-        : null,
-    },
-    {
-      type: "payments",
-      path: `/payments`,
-      limit: 100,
-      filter: latestPaymentCreatedTime
-        ? `createdTime>${latestPaymentCreatedTime || ""}`
-        : null,
-    },
-    {
-      type: "orders",
-      path: `/orders`,
-      limit: 100,
-      filter: latestOrderCreatedTime
-        ? `createdTime>${latestOrderCreatedTime || ""}`
-        : null,
-    },
-    {
-      type: "inventory",
-      path: `/items`,
-      limit: 100,
-      filter: null,
-    },
-  ];
-}
+class CloverHubSpotAPI {
+  #baseUrl = process.env.CLOVER_BASE_URL;
+  #merchantId = process.env.CLOVER_MERCHANT_ID;
+  #accessToken = process.env.CLOVER_ACCESS_TOKEN;
 
-async function fetchData() {
-  try {
-    const fetchDataPromises = getFetchDataMetadata().map(async (data) => {
-      if (data.type === "inventory" && latestCountOfItems > 0) {
+  constructor() {
+    this.customers = [];
+    this.payments = [];
+    this.orders = [];
+    this.inventory = [];
+  }
+
+  async getCustomers(limit = 100) {
+    const apiPath = `${this.#baseUrl}/${
+      this.#merchantId
+    }/customers?expand=emailAddresses&limit=${limit}${
+      latestCustomerSince ? `&customerSince>${latestCustomerSince}` : ""
+    }`;
+    const response = await fetch(apiPath, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${this.#accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const jsonData = await response.json();
+    if (jsonData.elements.length > 0) {
+      this.customers = jsonData.elements.map((customer) => {
+        const email =
+          customer.emailAddresses?.elements[0]?.emailAddress || null;
         return {
-          type: data.type,
-          data: [],
+          properties: {
+            firstname: customer.firstName,
+            lastname: customer.lastName,
+            email: email,
+          },
         };
-      }
-
-      const apiPath = `${process.env.CLOVER_BASE_URL}/${
-        process.env.CLOVER_MERCHANT_ID
-      }${data.path}?limit=${data.limit}${
-        data.filter ? `&filter=${data.filter}` : ""
-      }`;
-
-      const response = await fetch(apiPath, {
-        method: "GET",
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${process.env.CLOVER_ACCESS_TOKEN}`,
-        },
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (this.customers.length > 0) {
+        latestCustomerSince = this.customers[0]?.customerSince || null;
       }
+    } else {
+      latestCustomerSince = null;
+    }
 
-      try {
-        const jsonData = await response.json();
-        if (data.type === "customers" && jsonData.elements.length > 0) {
-          // Update latestCustomerSince with the most recent customer
-          // This assumes customerSince is a timestamp or date string
-          latestCustomerSince = jsonData.elements[0]?.customerSince || null;
-        } else if (data.type === "orders" && jsonData.elements.length > 0) {
-          // Update latestOrderCreatedTime with the most recent order
-          // This assumes createdTime is a timestamp or date string
-          latestOrderCreatedTime = jsonData.elements[0]?.createdTime || null;
-        } else if (data.type === "payments" && jsonData.elements.length > 0) {
-          // Update latestPaymentCreatedTime with the most recent payment
-          // This assumes createdTime is a timestamp or date string
-          latestPaymentCreatedTime = jsonData.elements[0]?.createdTime || null;
-        } else {
-          // Update latestCountOfItems with the count of items
-          latestCountOfItems = jsonData.elements.length;
-        }
+    return this.customers;
+  }
 
+  async getPayments(limit = 100) {
+    const apiPath = `${this.#baseUrl}/${
+      this.#merchantId
+    }/payments?limit=${limit}${
+      latestPaymentCreatedTime ? `&createdTime>${latestPaymentCreatedTime}` : ""
+    }`;
+    const response = await fetch(apiPath, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${this.#accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const jsonData = await response.json();
+    this.payments = jsonData.elements;
+    if (this.payments.length > 0) {
+      latestPaymentCreatedTime = this.payments[0]?.createdTime || null;
+    }
+    return this.payments;
+  }
+  async getOrders(limit = 100) {
+    const apiPath = `${this.#baseUrl}/${
+      this.#merchantId
+    }/orders?limit=${limit}${
+      latestOrderCreatedTime ? `&createdTime>${latestOrderCreatedTime}` : ""
+    }`;
+    const response = await fetch(apiPath, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${this.#accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const jsonData = await response.json();
+    this.orders = jsonData.elements;
+    if (this.orders.length > 0) {
+      latestOrderCreatedTime = this.orders[0]?.createdTime || null;
+    }
+    return this.orders;
+  }
+  async getInventory(limit = 100) {
+    if (latestCountOfItems > 0) {
+      return this.inventory;
+    }
+
+    const apiPath = `${this.#baseUrl}/${this.#merchantId}/items?limit=${limit}`;
+    const response = await fetch(apiPath, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${this.#accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const jsonData = await response.json();
+    if (jsonData.elements.length > 0) {
+      this.inventory = jsonData.elements.map((item) => {
         return {
-          type: data.type,
-          data: jsonData.elements,
+          properties: {
+            name: item.name,
+            price: item.price,
+          },
+          archived: item.deleted,
         };
-      } catch (error) {
-        console.error(`Error parsing JSON for ${data.type}:`, error);
-        throw error;
-      }
-    });
+      });
+      latestCountOfItems = this.inventory.length;
+    } else {
+      latestCountOfItems = 0;
+    }
 
-    return await Promise.all(fetchDataPromises);
-  } catch (error) {
-    console.error("Error fetching data:", error);
-    throw error;
-  }
-}
-
-const CLOVER_HUBSPOT_MAPPING = {
-  customers: "contacts",
-  orders: "orders",
-  payments: "commerce_payments",
-  inventory: "products",
-};
-
-function postCustomersToHubSpot(customers) {
-  if (customers.length === 0) {
-    return;
+    return this.inventory;
   }
 
-  const mapCustomersToHubspot = customers.map((customer) => {
-    return {
-      properties: {
-        firstname: customer.firstName,
-        lastname: customer.lastName,
-      },
-    };
-  });
-
-  fetch(
-    `${process.env.HUBSPOT_API_URL}/${
-      CLOVER_HUBSPOT_MAPPING[item.type]
-    }/batch/create`,
-    {
+  #searchContactByEmail = async (email) => {
+    const apiPath = `${process.env.HUBSPOT_API_URL}/contacts/search`;
+    const response = await fetch(apiPath, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
       },
       body: JSON.stringify({
-        inputs: mapCustomersToHubspot,
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: "email",
+                operator: "EQ",
+                value: email,
+              },
+            ],
+          },
+        ],
       }),
-    }
-  )
-    .then((response) => {
-      if (!response.ok) {
-        console.error("Error response from HubSpot:", response);
-      } else {
-        console.log("Customers posted to HubSpot successfully.");
-      }
-    })
-    .then((data) => {
-      console.log("HubSpot response data:", data);
     });
-}
 
-function postInventoryToHubSpot(items) {
-  if (items.length === 0) {
-    return;
-  }
-  const mapInventoryToHubspot = items.map((item) => {
-    return {
-      properties: {
-        name: item.name,
-        price: item.price,
-      },
-    };
-  });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const jsonData = await response.json();
+    if (jsonData.results.length > 0) {
+      return jsonData.results[0].id;
+    } else {
+      return null;
+    }
+  };
 
-  fetch(
-    `${process.env.HUBSPOT_API_URL}/${CLOVER_HUBSPOT_MAPPING.inventory}/batch/create`,
-    {
+  #createHubSpotContact = async (customer) => {
+    const apiPath = `${process.env.HUBSPOT_API_URL}/contacts`;
+    const response = await fetch(apiPath, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
         "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        inputs: mapInventoryToHubspot,
-      }),
-    }
-  )
-    .then((response) => {
-      if (!response.ok) {
-        console.error("Error response from HubSpot:", response);
-      } else {
-        console.log("Inventory posted to HubSpot successfully.");
-      }
-    })
-    .then((data) => {
-      console.log("HubSpot response data:", data);
-    });
-}
-
-function postOrdersToHubSpot(orders) {
-  if (orders.length === 0) {
-    return;
-  }
-
-  const mapOrdersToHubspot = orders.map((order) => {
-    return {
-      properties: {
-        order_id: order.id,
-        customer_id: order.customerId,
-        total_amount: order.totalAmount,
-      },
-    };
-  });
-
-  console.log("Mapped orders to HubSpot format:", mapOrdersToHubspot);
-
-  return;
-  fetch(`${process.env.HUBSPOT_API_URL}/${CLOVER_HUBSPOT_MAPPING[item.type]}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
-    },
-    body: JSON.stringify(data),
-  });
-}
-
-function postPaymentsToHubSpot(payments) {
-  if (payments.length === 0) {
-    return;
-  }
-
-  const mapPaymentsToHubspot = payments.map((payment) => {
-    return {
-      properties: {
-        payment_id: payment.id,
-        amount: payment.amount,
-        status: payment.status,
-      },
-    };
-  });
-
-  fetch(
-    `${process.env.HUBSPOT_API_URL}/${CLOVER_HUBSPOT_MAPPING.payments}/batch/create`,
-    {
-      method: "POST",
-      headers: {
         Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
       },
-      body: JSON.stringify(mapPaymentsToHubspot),
+      body: JSON.stringify(customer),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
-  );
-}
+    const jsonData = await response.json();
+    if (jsonData.id) {
+      console.log("Customer created in HubSpot:", jsonData);
+    }
+    return jsonData;
+  };
 
-async function postDataToHubSpot(fetchedData) {
-  try {
-    const customers = fetchedData[0].data;
-    const inventory = fetchedData[3].data;
-    const payments = fetchedData[1].data;
-    const orders = fetchedData[2].data;
+  #updateCustomer = async (customerId, customer) => {
+    const apiPath = `${process.env.HUBSPOT_API_URL}/contacts/${customerId}`;
+    const response = await fetch(apiPath, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify(customer),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const jsonData = await response.json();
+    if (jsonData.id) {
+      console.log("Customer updated in HubSpot:", jsonData);
+    }
+    return jsonData;
+  };
 
-    postCustomersToHubSpot(customers);
-    postInventoryToHubSpot(inventory);
-    // postOrdersToHubSpot(orders);
-    // postPaymentsToHubSpot(payments);
-  } catch (error) {
-    console.error("Error posting data to HubSpot:", error);
-    throw error;
+  async postCustomersToHubSpot() {
+    if (this.customers.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      this.customers.map(async (customer) => {
+        const email = customer.properties.email;
+        if (email) {
+          const id = await this.#searchContactByEmail(email);
+          if (id) {
+            await this.#updateCustomer(id, customer);
+          } else {
+            await this.#createHubSpotContact(customer);
+          }
+        }
+      })
+    );
+  }
+
+  async postItemsToHubSpot() {
+    if (this.inventory.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      this.inventory.map(async (item) => {
+        const apiPath = `${process.env.HUBSPOT_API_URL}/products`;
+        const response = await fetch(apiPath, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+          },
+          body: JSON.stringify(item),
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const jsonData = await response.json();
+        if (jsonData.id) {
+          console.log("Item created in HubSpot:", jsonData);
+        }
+      })
+    );
   }
 }
 
 async function fetchAndPostData() {
   try {
     console.log("Starting fetch and post process...");
-    const fetchedData = await fetchData();
+    const cloverHubSpotAPI = new CloverHubSpotAPI();
+    // Fetch customers, payments, and orders from Clover
+    await cloverHubSpotAPI.getCustomers();
+    // await cloverHubSpotAPI.getInventory();
 
-    const results = await postDataToHubSpot(fetchedData);
-    console.log("Data successfully processed:", results);
+    // Post customers and inventory to HubSpot
+    await cloverHubSpotAPI.postCustomersToHubSpot();
   } catch (error) {
     console.error("Error in fetchAndPostData:", error);
   }
 }
-
-// Schedule the cron job to run every hour
-cron.schedule("0 * * * *", async () => {
-  console.log("Cron job started at:", new Date().toISOString());
-  await fetchAndPostData();
-});
 
 // Run the fetch and post process immediately when the application starts
 (async () => {
