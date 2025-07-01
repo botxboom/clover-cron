@@ -43,6 +43,7 @@ class CloverHubSpotAPI {
           customer.emailAddresses?.elements[0]?.emailAddress || null;
         return {
           properties: {
+            cloverid: customer.id,
             firstname: customer.firstName,
             lastname: customer.lastName,
             email: email,
@@ -132,7 +133,7 @@ class CloverHubSpotAPI {
         return {
           properties: {
             name: item.name,
-            price: item.price,
+            price: item.price / 100,
           },
           archived: item.deleted,
         };
@@ -272,11 +273,14 @@ async function fetchAndPostData() {
     console.log("Starting fetch and post process...");
     const cloverHubSpotAPI = new CloverHubSpotAPI();
     // Fetch customers, payments, and orders from Clover
-    await cloverHubSpotAPI.getCustomers();
-    // await cloverHubSpotAPI.getInventory();
+    // await cloverHubSpotAPI.getCustomers(5);
+    // console.log(cloverHubSpotAPI.customers)
+    await cloverHubSpotAPI.getOrders(5);
+    console.log(cloverHubSpotAPI.orders)
+
 
     // Post customers and inventory to HubSpot
-    await cloverHubSpotAPI.postCustomersToHubSpot();
+    // await cloverHubSpotAPI.postCustomersToHubSpot();
   } catch (error) {
     console.error("Error in fetchAndPostData:", error);
   }
